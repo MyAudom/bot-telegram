@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration
-BOT_TOKEN = "8100671655:AAFd7yq0UE3nrxxhSnx0fhfMqwzrBBX2HJo"
+#BOT_TOKEN = "8100671655:AAFd7yq0UE3nrxxhSnx0fhfMqwzrBBX2HJo"
 DOWNLOAD_DIR = "downloads"
 
 # Function: Download with yt-dlp
