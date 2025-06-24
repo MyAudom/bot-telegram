@@ -1,113 +1,47 @@
 import os
-import yt_dlp
-import logging
-import asyncio
+import pytesseract
+from PIL import Image
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-from datetime import datetime
+from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
 
-# Logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Set this only if you're on Windows
+# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-# Configuration
-BOT_TOKEN = "7963297442:AAGmHvFOGekXBhGeSzFPscjCOvo0f3K7XG8"
-DOWNLOAD_DIR = "downloads"
+# Configure languages (English and Khmer)
+OCR_LANGUAGES = 'eng+khm'
 
-# Function: Download with yt-dlp
-def download_video(url: str):
-    if not os.path.exists(DOWNLOAD_DIR):
-        os.makedirs(DOWNLOAD_DIR)
-
-    ydl_opts = {
-        'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]',
-        'outtmpl': 'downloads/%(title)s.%(ext)s',
-        'noplaylist': True,
-        'merge_output_format': 'mp4',
-        'ffmpeg_location': 'ffmpeg',
-    }
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
-        if not filename.endswith(".mp4"):
-            filename = filename.rsplit(".", 1)[0] + ".mp4"
-        return filename, info
-
-# /start command
+# Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 សួស្តី! សូមផ្ញើ Link YouTube ឬ Facebook មកខ្ញុំ ដើម្បីទាញយកវីដេអូ។")
+    await update.message.reply_text("📷 Please send me an image, and I will extract the text (English/Khmer).")
 
-# Message handler
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text.strip()
-    status_msg = await update.message.reply_text("⏳ កំពុងទាញយកវីដេអូ...")
+# Handle image
+async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photo = update.message.photo[-1]
+    file = await photo.get_file()
+    image_path = f"{file.file_id}.jpg"
+    await file.download_to_drive(image_path)
 
+    # OCR
     try:
-        original_path, info = download_video(url)
-        file_size = os.path.getsize(original_path)
-
-        # Prepare metadata
-        title = info.get('title', 'N/A')
-        video_id = info.get('id', 'N/A')
-        uploader = info.get('uploader', 'N/A')
-        account_name = update.message.from_user.full_name
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        caption = (
-            f"*🧾Tittle* : {title}\n"
-            f"*🆔ID* : {video_id}\n"
-            f"*📛Page Name* : {uploader}\n"
-            f"*⬇️Download By* : Telegram Bot\n"
-            f"*🕰Time* : {current_time}\n"
-            f"*✅Account Name* : {account_name}"
-        )
-
-        if file_size > 50 * 1024 * 1024:
-            error_msg = await update.message.reply_text("❌ មិនអាចទាញយកឬបញ្ចូនវីដេអូបានទេ។")
-            try:
-                await context.bot.delete_message(chat_id=status_msg.chat_id, message_id=status_msg.message_id)
-                await context.bot.delete_message(chat_id=error_msg.chat_id, message_id=error_msg.message_id)
-            except Exception as e:
-                logger.warning(f"Could not delete message: {e}")
-            return
+        text = pytesseract.image_to_string(Image.open(image_path), lang=OCR_LANGUAGES)
+        if text.strip():
+            await update.message.reply_text(f"📝 Extracted Text:\n\n{text}")
         else:
-            sending_msg = await update.message.reply_text("⏳ កំពុងផ្ញើវីដេអូ...")
-
-            with open(original_path, "rb") as video_file:
-                sent_msg = await update.message.reply_video(video=video_file, caption=caption, parse_mode='Markdown')
-
-            # Give some time before deleting the messages
-            await asyncio.sleep(1)
-
-            try:
-                await context.bot.delete_message(chat_id=status_msg.chat_id, message_id=status_msg.message_id)
-                await context.bot.delete_message(chat_id=sending_msg.chat_id, message_id=sending_msg.message_id)
-            except Exception as e:
-                logger.warning(f"Could not delete message: {e}")
-
-            await update.message.reply_text("✅ ទាញយក និងផ្ញើវីដេអូបានជោគជ័យ!")
-
-            try:
-                os.remove(original_path)
-            except Exception as e:
-                logger.warning(f"Could not delete video file: {e}")
-
+            await update.message.reply_text("❌ No text found.")
     except Exception as e:
-        logger.error(f"Error: {e}")
-        error_msg = await update.message.reply_text("❌ មិនអាចទាញយកឬបញ្ចូនវីដេអូបានទេ។")
-        try:
-            await context.bot.delete_message(chat_id=status_msg.chat_id, message_id=status_msg.message_id)
-            await context.bot.delete_message(chat_id=error_msg.chat_id, message_id=error_msg.message_id)
-        except Exception as e:
-            logger.warning(f"Could not delete message: {e}")
-          
+        await update.message.reply_text(f"⚠️ Error: {str(e)}")
+    finally:
+        os.remove(image_path)
 
-# Main function
+# Main
 def main():
+    BOT_TOKEN = "7963297442:AAGmHvFOGekXBhGeSzFPscjCOvo0f3K7XG8"
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_image))
+
     print("✅ Bot is running...")
     app.run_polling()
 
